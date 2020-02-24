@@ -1,6 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import logo from './logo.svg';
+import logo from './logo.png';
 import './App.css';
+import IconButton from '@material-ui/core/IconButton';
+import DeleteOutlinedIcon from '@material-ui/icons/DeleteOutline';
+import { Input, TextField, createMuiTheme, ThemeProvider } from '@material-ui/core';
+import { teal } from '@material-ui/core/colors';
 
 type Todo = {
   id: number;
@@ -8,6 +12,14 @@ type Todo = {
 };
 
 const apiUrl = "http://localhost:7071/api";
+
+const theme = createMuiTheme({
+  palette: {
+    primary: {
+      main: teal["A200"],
+    }
+  },
+});
 
 const App = () => {
   const [todos, setTodos] = useState<Todo[]>([]);
@@ -18,11 +30,12 @@ const App = () => {
       .then(results => setTodos(results));
   }, []);
 
-  const handleNewTodoInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleNewTodoKeyPressed = (e: React.SyntheticEvent<any, Event>) => {
     const inputTarget = e.target as HTMLInputElement;
     const value = inputTarget.value;
+    const eventKey = (e as any).key;
 
-    if (inputTarget && e.key && e.key.toLowerCase() === 'enter' && value) {
+    if (inputTarget && eventKey && eventKey.toLowerCase() === 'enter' && value) {
       const payload = {
         content: value
       };
@@ -40,7 +53,7 @@ const App = () => {
     }
   }
 
-  const handleTodoBlur = (e: React.FocusEvent<HTMLInputElement>, id: number) => {
+  const handleTodoBlur = (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>, id: number) => {
     const inputTarget = e.target as HTMLInputElement;
 
     if (inputTarget) {
@@ -80,25 +93,41 @@ const App = () => {
   }
 
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.tsx</code> and save to reload.
-        </p>
+    <ThemeProvider theme={theme}>
+      <div className="app">
+        <header className="header">
+          <img src={logo} style={{ height: 50, marginBottom: 40 }} alt="logo" />
 
-        {todos.map(todo => {
-          return (<div key={todo.id}>
-            <input type="text" defaultValue={todo.content} onBlur={e => handleTodoBlur(e, todo.id)} />
-            <button onClick={_ => handleRemoveTodoButtonClicked(todo.id)}>
-              Remove
-            </button>
-          </div>);
-        })}
+          {todos.map(todo => {
+            return (
+              <div key={todo.id}>
+                <Input
+                  style={{ width: 350 }}
+                  defaultValue={todo.content}
+                  inputProps={{ 'aria-label': 'description' }}
+                  onBlur={e => handleTodoBlur(e, todo.id)}
+                />
+                <IconButton
+                  aria-label="delete"
+                  color="secondary"
+                  onClick={_ => handleRemoveTodoButtonClicked(todo.id)}
+                >
+                  <DeleteOutlinedIcon />
+                </IconButton>
+              </div>
+            );
+          })}
 
-        <input type="text" onKeyPress={e => handleNewTodoInput(e)} />
-      </header>
-    </div>
+          <TextField
+            label="New things to do?"
+            onKeyPress={e => handleNewTodoKeyPressed(e)}
+            style={{ marginTop: 40, width: 550 }}
+            size="small"
+            variant="outlined"
+          />
+        </header>
+      </div>
+    </ThemeProvider>
   );
 }
 
