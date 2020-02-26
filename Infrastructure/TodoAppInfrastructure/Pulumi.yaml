@@ -1,0 +1,3 @@
+name: TodoAppInfrastructure
+runtime: dotnet
+description: The infrastructure of a todo list app

@@ -1,3 +1,0 @@
-name: quickstart
-runtime: dotnet
-description: A minimal Azure C# Pulumi program
