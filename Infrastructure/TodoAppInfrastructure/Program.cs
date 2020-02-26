@@ -201,7 +201,7 @@ class Program
                 .Split(new[] { "," }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(ip =>
                 {
-                    return new FirewallRule($"fw-{ip}", new FirewallRuleArgs
+                    return new FirewallRule($"fw{ip}", new FirewallRuleArgs
                     {
                         ResourceGroupName = resourceGroup.Name,
                         ServerName = sqlServer.Name,
