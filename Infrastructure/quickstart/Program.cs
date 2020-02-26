@@ -1,4 +1,7 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Shared.Protocol;
@@ -19,7 +22,7 @@ class Program
             var resourceGroup = new ResourceGroup("resourceGroup");
 
             // Create an Azure Storage Account
-            var storageAccount = new Account("storage", new AccountArgs
+            var frontendStorageAccount = new Account("frontendstorage", new AccountArgs
             {
                 ResourceGroupName = resourceGroup.Name,
                 AccountReplicationType = "LRS",
@@ -29,9 +32,41 @@ class Program
                 AccessTier = "Hot",
             });
 
-            storageAccount.PrimaryBlobConnectionString.Apply(async v => await EnableStaticSites(v));
+            var frontEndpoint = Output.All<string>(frontendStorageAccount.Name, frontendStorageAccount.PrimaryBlobConnectionString).Apply(async x =>
+            {
+                string frontendStorageAccountName = x[0];
+                string connectionString = x[1];
 
-            // TODO : Deploy React Website
+                var sa = CloudStorageAccount.Parse(connectionString);
+                await EnableStaticWebsite(sa);
+
+                string getWebsiteEndpointCli = $"az storage account show --name {frontendStorageAccountName} --query primaryEndpoints.web";
+
+                var processInfo = new ProcessStartInfo("cmd.exe")
+                {
+                    UseShellExecute = false,
+                    RedirectStandardInput = true,
+                    RedirectStandardOutput = true,
+                    CreateNoWindow = true,
+                    Arguments = $"/K {getWebsiteEndpointCli}"
+                };
+
+                var process = Process.Start(processInfo);
+                string? line = null;
+
+                while (!process.StandardOutput.EndOfStream)
+                {
+                    line = process.StandardOutput.ReadLine();
+
+                    if (!string.IsNullOrWhiteSpace(line))
+                    {
+                        line = line.Replace("\"", "");
+                        break;
+                    }
+                }
+
+                return line;
+            });
 
             // Create App Service Plan
             var appServicePlan = new Plan("asp", new PlanArgs
@@ -56,7 +91,7 @@ class Program
                 AdministratorLoginPassword = sqlServerPassword,
                 Version = "12.0"
             });
-            
+
             var sqlDatabase = new Database("sqldatabase", new DatabaseArgs
             {
                 ResourceGroupName = resourceGroup.Name,
@@ -67,19 +102,29 @@ class Program
             });
 
             // Create an Azure Functions Account
+            var backendStorageAccount = new Account("backendstorage", new AccountArgs
+            {
+                ResourceGroupName = resourceGroup.Name,
+                AccountReplicationType = "LRS",
+                EnableHttpsTrafficOnly = true,
+                AccountTier = "Standard",
+                AccountKind = "StorageV2",
+                AccessTier = "Hot",
+            });
+
             var container = new Container("zips", new ContainerArgs
             {
-                StorageAccountName = storageAccount.Name,
+                StorageAccountName = backendStorageAccount.Name,
                 ContainerAccessType = "private",
             });
             var blob = new ZipBlob("zip", new ZipBlobArgs
             {
-                StorageAccountName = storageAccount.Name,
+                StorageAccountName = backendStorageAccount.Name,
                 StorageContainerName = container.Name,
                 Type = "block",
                 Content = new FileArchive("../../TodoFunctions/bin/Debug/netcoreapp2.1/publish"),
             });
-            var codeBlobUrl = SharedAccessSignature.SignedBlobReadUrl(blob, storageAccount);
+            var codeBlobUrl = SharedAccessSignature.SignedBlobReadUrl(blob, backendStorageAccount);
 
             var sqlConnectionStringOutput = Output.Format($"Server=tcp:{sqlServer.FullyQualifiedDomainName};initial catalog={sqlDatabase.Name};user ID={sqlServerUsername};password={sqlServerPassword};Min Pool Size=0;Max Pool Size=30;Persist Security Info=true;");
 
@@ -93,24 +138,49 @@ class Program
                     { "WEBSITE_RUN_FROM_PACKAGE", codeBlobUrl },
                     { "ConnectionString", sqlConnectionStringOutput }
                 },
-                StorageConnectionString = storageAccount.PrimaryConnectionString,
+                SiteConfig = new FunctionAppSiteConfigArgs
+                {
+                    Cors = new FunctionAppSiteConfigCorsArgs
+                    {
+                        AllowedOrigins = new List<string> { "*" }
+                    }
+                },
+                StorageConnectionString = backendStorageAccount.PrimaryConnectionString,
                 Version = "~2",
+            });
+
+            // Give access from Functions -> SQL database
+            var firewallRules = app.OutboundIpAddresses.Apply(outboundIpAddresses =>
+            {
+                return outboundIpAddresses
+                    .Split(new[] { "," }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(ip =>
+                    {
+                        return new FirewallRule($"FR{ip}", new FirewallRuleArgs
+                        {
+                            ResourceGroupName = resourceGroup.Name,
+                            ServerName = sqlServer.Name,
+                            StartIpAddress = ip,
+                            EndIpAddress = ip
+                        });
+                    })
+                    .ToList();
             });
 
             // Export the connection string for the storage account
             return new Dictionary<string, object?>
             {
-                { "blobStorageConnectionString", storageAccount.PrimaryConnectionString },
+                { "frontendBlobStorageConnectionString", frontendStorageAccount.PrimaryConnectionString },
+                { "backendBlobStorageConnectionString", backendStorageAccount.PrimaryConnectionString },
                 { "sqlServerConnectionString", sqlConnectionStringOutput },
                 { "apiEndpoint", Output.Format($"https://{app.DefaultHostname}/api") },
+                { "frontEndpoint", frontEndpoint }
             };
         });
     }
 
-    static async Task EnableStaticSites(string connectionString)
+    static Task EnableStaticWebsite(CloudStorageAccount sa)
     {
-        var sa = CloudStorageAccount.Parse(connectionString);
-
         var blobClient = sa.CreateCloudBlobClient();
         var blobServiceProperties = new ServiceProperties
         {
@@ -122,6 +192,6 @@ class Program
             }
         };
 
-        await blobClient.SetServicePropertiesAsync(blobServiceProperties);
+        return blobClient.SetServicePropertiesAsync(blobServiceProperties);
     }
 }
