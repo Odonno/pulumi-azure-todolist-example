@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Shared.Protocol;
 using Pulumi;
+using Pulumi.Azure.AppInsights;
 using Pulumi.Azure.AppService;
 using Pulumi.Azure.AppService.Inputs;
 using Pulumi.Azure.Core;
@@ -24,27 +25,41 @@ class Program
             // Create an Azure Resource Group
             var resourceGroup = new ResourceGroup("resourceGroup");
 
+            // Create an Azure App Insights
+            var appInsightsKey = CreateAzureAppInsights(resourceGroup);
+
             // Create an Azure Static Websites (inside Storage Account)
             var frontEndpoint = CreateAzureStaticWebsites(resourceGroup);
 
             // Create and Azure SQL Server
-            var sqlConnectionStringOutput = CreateSqlInstance(resourceGroup, out SqlServer sqlServer, out Database sqlDatabase);
+            var sqlConnectionString = CreateAzureSqlInstance(resourceGroup, out SqlServer sqlServer, out Database sqlDatabase);
 
             // Create an Azure Functions Account (using Service Plan and backed by Storage Account)
-            var functionApp = CreateAzureFunctionApp(resourceGroup, sqlConnectionStringOutput);
+            var functionApp = CreateAzureFunctionApp(resourceGroup, sqlConnectionString, appInsightsKey);
             SetFirewallRulesToAccessSqlServer(resourceGroup, functionApp, sqlServer); // Give access from Functions -> SQL database
 
             // Export information of Azure resources created
             return new Dictionary<string, object?>
             {
-                { "sqlServerConnectionString", sqlConnectionStringOutput },
+                { "sqlServerConnectionString", sqlConnectionString },
                 { "apiEndpoint", Output.Format($"https://{functionApp.DefaultHostname}/api") },
                 { "frontEndpoint", frontEndpoint }
             };
         });
     }
 
-    static Output<string> CreateAzureStaticWebsites(ResourceGroup resourceGroup)
+    static Output<string> CreateAzureAppInsights(ResourceGroup resourceGroup)
+    {
+        var appInsights = new Insights("appinsights", new InsightsArgs
+        {
+            ResourceGroupName = resourceGroup.Name,
+            ApplicationType = "web"
+        });
+
+        return appInsights.InstrumentationKey;
+    }
+
+    static Output<string?> CreateAzureStaticWebsites(ResourceGroup resourceGroup)
     {
         var frontendStorageAccount = new Account("frontendstorage", new AccountArgs
         {
@@ -113,7 +128,7 @@ class Program
         return line;
     }
 
-    static Output<string> CreateSqlInstance(ResourceGroup resourceGroup, out SqlServer sqlServer, out Database sqlDatabase)
+    static Output<string> CreateAzureSqlInstance(ResourceGroup resourceGroup, out SqlServer sqlServer, out Database sqlDatabase)
     {
         sqlServer = new SqlServer("sqlserver", new SqlServerArgs
         {
@@ -134,7 +149,7 @@ class Program
         return Output.Format($"Server=tcp:{sqlServer.FullyQualifiedDomainName};initial catalog={sqlDatabase.Name};user ID={_sqlServerUsername};password={_sqlServerPassword};Min Pool Size=0;Max Pool Size=30;Persist Security Info=true;");
     }
 
-    static FunctionApp CreateAzureFunctionApp(ResourceGroup resourceGroup, Output<string> sqlConnectionStringOutput)
+    static FunctionApp CreateAzureFunctionApp(ResourceGroup resourceGroup, Output<string> sqlConnectionString, Output<string> appInsightsKey)
     {
         var appServicePlan = new Plan("asp", new PlanArgs
         {
@@ -179,7 +194,8 @@ class Program
             {
                 { "runtime", "dotnet" },
                 { "WEBSITE_RUN_FROM_PACKAGE", codeBlobUrl },
-                { "ConnectionString", sqlConnectionStringOutput }
+                { "ConnectionString", sqlConnectionString },
+                { "APPINSIGHTS_INSTRUMENTATIONKEY", appInsightsKey }
             },
             SiteConfig = new FunctionAppSiteConfigArgs
             {
@@ -189,7 +205,7 @@ class Program
                 }
             },
             StorageConnectionString = backendStorageAccount.PrimaryConnectionString,
-            Version = "~2",
+            Version = "~2"
         });
     }
 
