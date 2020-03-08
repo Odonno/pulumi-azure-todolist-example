@@ -15,9 +15,6 @@ using Pulumi.Azure.Storage;
 
 class Program
 {
-    private const string _sqlServerUsername = "TodoAdmin";
-    private const string _sqlServerPassword = "T0d0Adm1n";
-
     static Task<int> Main()
     {
         return Deployment.RunAsync(() =>
@@ -133,8 +130,8 @@ class Program
         sqlServer = new SqlServer("sqlserver", new SqlServerArgs
         {
             ResourceGroupName = resourceGroup.Name,
-            AdministratorLogin = _sqlServerUsername,
-            AdministratorLoginPassword = _sqlServerPassword,
+            AdministratorLogin = TodoAppConstants.SqlServerUsername,
+            AdministratorLoginPassword = TodoAppConstants.SqlServerPassword,
             Version = "12.0"
         });
         sqlDatabase = new Database("sqldatabase", new DatabaseArgs
@@ -146,7 +143,7 @@ class Program
             Edition = "Basic"
         });
 
-        return Output.Format($"Server=tcp:{sqlServer.FullyQualifiedDomainName};initial catalog={sqlDatabase.Name};user ID={_sqlServerUsername};password={_sqlServerPassword};Min Pool Size=0;Max Pool Size=30;Persist Security Info=true;");
+        return Output.Format($"Server=tcp:{sqlServer.FullyQualifiedDomainName};initial catalog={sqlDatabase.Name};user ID={TodoAppConstants.SqlServerUsername};password={TodoAppConstants.SqlServerPassword};Min Pool Size=0;Max Pool Size=30;Persist Security Info=true;");
     }
 
     static FunctionApp CreateAzureFunctionApp(ResourceGroup resourceGroup, Output<string> sqlConnectionString, Output<string> appInsightsKey)
