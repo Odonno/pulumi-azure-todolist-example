@@ -4,9 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
-using Microsoft.Azure.Batch;
 using Microsoft.WindowsAzure.Storage;
-using Microsoft.WindowsAzure.Storage.Blob;
 using Microsoft.WindowsAzure.Storage.Shared.Protocol;
 using Pulumi;
 using Pulumi.Azure.AppInsights;
@@ -131,72 +129,18 @@ class Program
 
         return line;
     }
-
     static Task UploadFilesToStaticWebsite(string connectionString)
     {
         var sa = CloudStorageAccount.Parse(connectionString);
-
         var blobClient = sa.CreateCloudBlobClient();
 
-        string inputPath = Path.Combine(Environment.CurrentDirectory, "../../Front/build");
-        var inputFilePaths = new List<string>(
-            Directory.GetFileSystemEntries(inputPath, "*", SearchOption.AllDirectories)
+        string inputPath = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, @"..\..\Front\build"));
+        
+        return CloudBlobClientExtensions.UploadFolderToContainerAsync(
+           blobClient,
+           "$web",
+           inputPath
         );
-
-        return UploadFilesToContainerAsync(
-            blobClient,
-            "$web",
-            inputFilePaths
-        );
-    }
-    /// <summary>
-    /// Uploads the specified resource files to a container.
-    /// </summary>
-    /// <param name="blobClient">A <see cref="CloudBlobClient"/>.</param>
-    /// <param name="containerName">Name of the blob storage container to which the files are uploaded.</param>
-    /// <param name="filePaths">A collection of paths of the files to be uploaded to the container.</param>
-    /// <returns>A collection of <see cref="ResourceFile"/> objects.</returns>
-    private static async Task<List<ResourceFile>> UploadFilesToContainerAsync(CloudBlobClient blobClient, string containerName, List<string> filePaths)
-    {
-        List<ResourceFile> resourceFiles = new List<ResourceFile>();
-
-        foreach (string filePath in filePaths)
-        {
-            resourceFiles.Add(await UploadResourceFileToContainerAsync(blobClient, containerName, filePath));
-        }
-
-        return resourceFiles;
-    }
-    /// <summary>
-    /// Uploads the specified file to the specified blob container.
-    /// </summary>
-    /// <param name="blobClient">A <see cref="CloudBlobClient"/>.</param>
-    /// <param name="containerName">The name of the blob storage container to which the file should be uploaded.</param>
-    /// <param name="filePath">The full path to the file to upload to Storage.</param>
-    /// <returns>A ResourceFile object representing the file in blob storage.</returns>
-    private static async Task<ResourceFile> UploadResourceFileToContainerAsync(CloudBlobClient blobClient, string containerName, string filePath)
-    {
-        Console.WriteLine("Uploading file {0} to container [{1}]...", filePath, containerName);
-
-        string blobName = Path.GetFileName(filePath);
-
-        var container = blobClient.GetContainerReference(containerName);
-        var blobData = container.GetBlockBlobReference(blobName);
-        await blobData.UploadFromFileAsync(filePath);
-
-        // Set the expiry time and permissions for the blob shared access signature. In this case, no start time is specified,
-        // so the shared access signature becomes valid immediately
-        var sasConstraints = new SharedAccessBlobPolicy
-        {
-            SharedAccessExpiryTime = DateTime.UtcNow.AddHours(2),
-            Permissions = SharedAccessBlobPermissions.Read
-        };
-
-        // Construct the SAS URL for blob
-        string sasBlobToken = blobData.GetSharedAccessSignature(sasConstraints);
-        string blobSasUri = string.Format("{0}{1}", blobData.Uri, sasBlobToken);
-
-        return new ResourceFile(blobSasUri, blobName);
     }
 
     static Output<string> CreateAzureSqlInstance(ResourceGroup resourceGroup, out SqlServer sqlServer, out Database sqlDatabase)
@@ -288,7 +232,7 @@ class Program
                 .Split(new[] { "," }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(ip =>
                 {
-                    return new FirewallRule($"fw{ip}", new FirewallRuleArgs
+                    return new FirewallRule($"{ip}.", new FirewallRuleArgs
                     {
                         ResourceGroupName = resourceGroup.Name,
                         ServerName = sqlServer.Name,
