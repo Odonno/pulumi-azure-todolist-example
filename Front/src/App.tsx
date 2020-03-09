@@ -11,7 +11,7 @@ type Todo = {
   content: string;
 };
 
-const apiUrl = "http://localhost:7071/api";
+const apiUrl = process.env.REACT_APP_TODO_API_ENDPOINT;
 
 const theme = createMuiTheme({
   palette: {

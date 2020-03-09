@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -27,9 +26,6 @@ class Program
             // Create an Azure App Insights
             var appInsightsKey = CreateAzureAppInsights(resourceGroup);
 
-            // Create an Azure Static Websites (inside Storage Account)
-            var frontEndpoint = CreateAzureStaticWebsites(resourceGroup);
-
             // Create and Azure SQL Server
             var sqlConnectionString = CreateAzureSqlInstance(resourceGroup, out SqlServer sqlServer, out Database sqlDatabase);
 
@@ -37,11 +33,16 @@ class Program
             var functionApp = CreateAzureFunctionApp(resourceGroup, sqlConnectionString, appInsightsKey);
             SetFirewallRulesToAccessSqlServer(resourceGroup, functionApp, sqlServer); // Give access from Functions -> SQL database
 
+            var apiEndpointOutput = Output.Format($"https://{functionApp.DefaultHostname}/api");
+
+            // Create an Azure Static Websites (inside Storage Account)
+            var frontEndpoint = CreateAzureStaticWebsites(resourceGroup, apiEndpointOutput);
+
             // Export information of Azure resources created
             return new Dictionary<string, object?>
             {
                 { "sqlServerConnectionString", sqlConnectionString },
-                { "apiEndpoint", Output.Format($"https://{functionApp.DefaultHostname}/api") },
+                { "apiEndpoint", apiEndpointOutput },
                 { "frontEndpoint", frontEndpoint }
             };
         });
@@ -58,7 +59,7 @@ class Program
         return appInsights.InstrumentationKey;
     }
 
-    static Output<string> CreateAzureStaticWebsites(ResourceGroup resourceGroup)
+    static Output<string> CreateAzureStaticWebsites(ResourceGroup resourceGroup, Output<string> apiEndpointOutput)
     {
         var frontendStorageAccount = new Account("frontendstorage", new AccountArgs
         {
@@ -78,29 +79,45 @@ class Program
             }
         });
 
-        // Upload files to static websites
-        string folderPath = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, @"..\..\Front\build"));
-        var files = GetFilesInFolder(folderPath);
-
-        foreach (var file in files)
+        apiEndpointOutput.Apply(apiEndpoint =>
         {
-            string blobName = Path.GetFullPath(file).Substring(folderPath.Length + 1);
-
-            if (!new FileExtensionContentTypeProvider().TryGetContentType(file, out string contentType))
+            if (!Deployment.Instance.IsDryRun)
             {
-                contentType = "application/octet-stream";
+                ReplaceBackendUrlInStaticWebsite(apiEndpoint);
             }
 
-            var uploadedFile = new Blob(blobName, new BlobArgs
-            {
-                Name = blobName,
-                StorageAccountName = frontendStorageAccount.Name,
-                StorageContainerName = "$web",
-                Type = "Block",
-                Source = file,
-                ContentType = contentType,
-            });
-        }
+            // Upload files to static websites
+            string folderPath = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, @"..\..\Front\build"));
+            var files = GetFilesInFolder(folderPath);
+
+            var timestamp = new DateTimeOffset(DateTime.UtcNow).ToUnixTimeSeconds();
+
+            return files
+                .Select(file =>
+                {
+                    string blobName = Path.GetFullPath(file).Substring(folderPath.Length + 1);
+
+                    if (!new FileExtensionContentTypeProvider().TryGetContentType(file, out string contentType))
+                    {
+                        contentType = "application/octet-stream";
+                    }
+
+                    return new Blob(blobName, new BlobArgs
+                    {
+                        Name = blobName,
+                        StorageAccountName = frontendStorageAccount.Name,
+                        StorageContainerName = "$web",
+                        Type = "Block",
+                        Source = file,
+                        ContentType = contentType,
+                        Metadata = new Dictionary<string, string>
+                        {
+                            { "version", timestamp.ToString() } // TODO : use file hash instead
+                        }
+                    }, new CustomResourceOptions { DeleteBeforeReplace = true });
+                })
+                .ToList();
+        });
 
         return frontendStorageAccount.PrimaryWebEndpoint;
     }
@@ -120,6 +137,20 @@ class Program
         };
 
         return blobClient.SetServicePropertiesAsync(blobServiceProperties);
+    }
+    static void ReplaceBackendUrlInStaticWebsite(string apiEndpoint)
+    {
+        string folderPath = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, @"..\..\Front\build"));
+        var files = GetFilesInFolder(folderPath);
+        var mainJsFiles = files.Where(f => f.EndsWith(".js") && f.Contains("main."));
+
+        foreach (var mainJsFile in mainJsFiles)
+        {
+            File.WriteAllText(
+                mainJsFile,
+                File.ReadAllText(mainJsFile).Replace("#{REACT_APP_TODO_API_ENDPOINT}", apiEndpoint)
+            );
+        }
     }
     static IEnumerable<string> GetFilesInFolder(string directory)
     {
