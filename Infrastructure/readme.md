@@ -23,7 +23,3 @@ https://www.pulumi.com/docs/get-started/azure/create-project/
 ### Write the program
 
 The .NET solution is now generated. You may write your own code based on your needs.
-
-
-// TODO : Save Pulumi state on Azure
-// TODO : Create stacks for test & prod
