@@ -57,7 +57,7 @@ class Program
         return appInsights.InstrumentationKey;
     }
 
-    static Output<string?> CreateAzureStaticWebsites(ResourceGroup resourceGroup)
+    static Output<string> CreateAzureStaticWebsites(ResourceGroup resourceGroup)
     {
         var frontendStorageAccount = new Account("frontendstorage", new AccountArgs
         {
@@ -68,20 +68,17 @@ class Program
             AccountKind = "StorageV2",
             AccessTier = "Hot",
         });
-
-        var frontEndpoint = Output.All<string>(frontendStorageAccount.Name, frontendStorageAccount.PrimaryBlobConnectionString).Apply(async x =>
+        
+        frontendStorageAccount.PrimaryBlobConnectionString.Apply(async connectionString =>
         {
-            string frontendStorageAccountName = x[0];
-            string connectionString = x[1];
-
-            await EnableStaticWebsite(connectionString);
-            var websiteUrl = GetStaticWebsiteEndpoint(frontendStorageAccountName);
-            await UploadFilesToStaticWebsite(connectionString);
-
-            return websiteUrl;
+            if (!Deployment.Instance.IsDryRun)
+            {
+                await EnableStaticWebsite(connectionString);
+                await UploadFilesToStaticWebsite(connectionString);
+            }
         });
 
-        return frontEndpoint;
+        return frontendStorageAccount.PrimaryWebEndpoint;
     }
     static Task EnableStaticWebsite(string connectionString)
     {
@@ -99,35 +96,6 @@ class Program
         };
 
         return blobClient.SetServicePropertiesAsync(blobServiceProperties);
-    }
-    static string? GetStaticWebsiteEndpoint(string frontendStorageAccountName)
-    {
-        string getWebsiteEndpointCli = $"az storage account show --name {frontendStorageAccountName} --query primaryEndpoints.web";
-
-        var processInfo = new ProcessStartInfo("cmd.exe")
-        {
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            CreateNoWindow = true,
-            Arguments = $"/K {getWebsiteEndpointCli}"
-        };
-
-        var process = Process.Start(processInfo);
-        string? line = null;
-
-        while (!process.StandardOutput.EndOfStream)
-        {
-            line = process.StandardOutput.ReadLine();
-
-            if (!string.IsNullOrWhiteSpace(line))
-            {
-                line = line.Replace("\"", "");
-                break;
-            }
-        }
-
-        return line;
     }
     static Task UploadFilesToStaticWebsite(string connectionString)
     {
