@@ -33,7 +33,7 @@ cd Front && yarn install && yarn build
 Start a new cli and run: 
 
 ```
-cd TodoFunctions && dotnet publish
+cd TodoFunctions && dotnet publish -c Release
 ```
 
 #### Run pulumi
