@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.StaticFiles;
 using Microsoft.WindowsAzure.Storage;
 using Microsoft.WindowsAzure.Storage.Shared.Protocol;
 using Pulumi;
@@ -68,15 +69,38 @@ class Program
             AccountKind = "StorageV2",
             AccessTier = "Hot",
         });
-        
+
         frontendStorageAccount.PrimaryBlobConnectionString.Apply(async connectionString =>
         {
             if (!Deployment.Instance.IsDryRun)
             {
                 await EnableStaticWebsite(connectionString);
-                await UploadFilesToStaticWebsite(connectionString);
             }
         });
+
+        // Upload files to static websites
+        string folderPath = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, @"..\..\Front\build"));
+        var files = GetFilesInFolder(folderPath);
+
+        foreach (var file in files)
+        {
+            string blobName = Path.GetFullPath(file).Substring(folderPath.Length + 1);
+
+            if (!new FileExtensionContentTypeProvider().TryGetContentType(file, out string contentType))
+            {
+                contentType = "application/octet-stream";
+            }
+
+            var uploadedFile = new Blob(blobName, new BlobArgs
+            {
+                Name = blobName,
+                StorageAccountName = frontendStorageAccount.Name,
+                StorageContainerName = "$web",
+                Type = "Block",
+                Source = file,
+                ContentType = contentType,
+            });
+        }
 
         return frontendStorageAccount.PrimaryWebEndpoint;
     }
@@ -97,17 +121,12 @@ class Program
 
         return blobClient.SetServicePropertiesAsync(blobServiceProperties);
     }
-    static Task UploadFilesToStaticWebsite(string connectionString)
+    static IEnumerable<string> GetFilesInFolder(string directory)
     {
-        var sa = CloudStorageAccount.Parse(connectionString);
-        var blobClient = sa.CreateCloudBlobClient();
-
-        string inputPath = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, @"..\..\Front\build"));
-        
-        return CloudBlobClientExtensions.UploadFolderToContainerAsync(
-           blobClient,
-           "$web",
-           inputPath
+        return Directory.EnumerateFiles(directory)
+            .Concat(
+                Directory.EnumerateDirectories(directory)
+                    .SelectMany(subDirectory => GetFilesInFolder(subDirectory))
         );
     }
 
