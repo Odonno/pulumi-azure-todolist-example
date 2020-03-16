@@ -87,10 +87,8 @@ class Program
             }
 
             // Upload files to static websites
-            string folderPath = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, @"..\..\Front\build"));
+            string folderPath = Path.GetFullPath(Path.Combine(System.Environment.CurrentDirectory, @"..\..\Front\build"));
             var files = GetFilesInFolder(folderPath);
-
-            var timestamp = new DateTimeOffset(DateTime.UtcNow).ToUnixTimeSeconds();
 
             return files
                 .Select(file =>
@@ -108,13 +106,9 @@ class Program
                         StorageAccountName = frontendStorageAccount.Name,
                         StorageContainerName = "$web",
                         Type = "Block",
-                        Source = file,
+                        Source = new FileAsset(file),
                         ContentType = contentType,
-                        Metadata = new Dictionary<string, string>
-                        {
-                            { "version", timestamp.ToString() } // TODO : use file hash instead
-                        }
-                    }, new CustomResourceOptions { DeleteBeforeReplace = true });
+                    });
                 })
                 .ToList();
         });
@@ -140,7 +134,7 @@ class Program
     }
     static void ReplaceBackendUrlInStaticWebsite(string apiEndpoint)
     {
-        string folderPath = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, @"..\..\Front\build"));
+        string folderPath = Path.GetFullPath(Path.Combine(System.Environment.CurrentDirectory, @"..\..\Front\build"));
         var files = GetFilesInFolder(folderPath);
         var mainJsFiles = files.Where(f => f.EndsWith(".js") && f.Contains("main."));
 
@@ -210,12 +204,12 @@ class Program
             StorageAccountName = backendStorageAccount.Name,
             ContainerAccessType = "private",
         });
-        var blob = new ZipBlob("zip", new ZipBlobArgs
+        var blob = new Blob("zip", new BlobArgs
         {
             StorageAccountName = backendStorageAccount.Name,
             StorageContainerName = container.Name,
-            Type = "block",
-            Content = new FileArchive("../../TodoFunctions/bin/Release/netcoreapp2.1/publish"),
+            Type = "Block",
+            Source = new FileArchive("../../TodoFunctions/bin/Release/netcoreapp2.1/publish"),
         });
         var codeBlobUrl = SharedAccessSignature.SignedBlobReadUrl(blob, backendStorageAccount);
 
