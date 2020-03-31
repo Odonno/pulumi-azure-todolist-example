@@ -4,8 +4,6 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.StaticFiles;
-using Microsoft.WindowsAzure.Storage;
-using Microsoft.WindowsAzure.Storage.Shared.Protocol;
 using Pulumi;
 using Pulumi.Azure.AppInsights;
 using Pulumi.Azure.AppService;
@@ -13,6 +11,7 @@ using Pulumi.Azure.AppService.Inputs;
 using Pulumi.Azure.Core;
 using Pulumi.Azure.Sql;
 using Pulumi.Azure.Storage;
+using Pulumi.Azure.Storage.Inputs;
 
 class Program
 {
@@ -69,16 +68,13 @@ class Program
             AccountTier = "Standard",
             AccountKind = "StorageV2",
             AccessTier = "Hot",
-        });
-
-        frontendStorageAccount.PrimaryBlobConnectionString.Apply(async connectionString =>
-        {
-            if (!Deployment.Instance.IsDryRun)
+            StaticWebsite = new AccountStaticWebsiteArgs
             {
-                await EnableStaticWebsite(connectionString);
+                IndexDocument = "index.html",
+                Error404Document = "index.html"
             }
         });
-
+        
         apiEndpointOutput.Apply(apiEndpoint =>
         {
             if (!Deployment.Instance.IsDryRun)
@@ -114,23 +110,6 @@ class Program
         });
 
         return frontendStorageAccount.PrimaryWebEndpoint;
-    }
-    static Task EnableStaticWebsite(string connectionString)
-    {
-        var sa = CloudStorageAccount.Parse(connectionString);
-
-        var blobClient = sa.CreateCloudBlobClient();
-        var blobServiceProperties = new ServiceProperties
-        {
-            StaticWebsite = new StaticWebsiteProperties
-            {
-                Enabled = true,
-                IndexDocument = "index.html",
-                ErrorDocument404Path = "index.html"
-            }
-        };
-
-        return blobClient.SetServicePropertiesAsync(blobServiceProperties);
     }
     static void ReplaceBackendUrlInStaticWebsite(string apiEndpoint)
     {
